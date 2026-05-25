@@ -1,0 +1,53 @@
+services:
+  realsense:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: realsense-ros2-jazzy:latest
+    container_name: realsense
+
+    environment:
+      # X11 GUI (RViz2, rqt)
+      DISPLAY: ${DISPLAY:-:0}
+      QT_X11_NO_MITSHM: 1
+      XDG_RUNTIME_DIR: /tmp/runtime-root
+      # NVIDIA — runtime injects libGL, libcuda etc at container start
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: graphics,compute,utility,video
+      # ROS 2
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      ROS_AUTOMATIC_DISCOVERY_RANGE: localhost
+      RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+      CYCLONEDDS_URI: "file:///dds_profiles/cyclonedds_profile.xml"
+
+    volumes:
+      # X11 socket for GUI
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # Full /dev so all video + USB devices are visible (same approach as 2b-t repo)
+      - /dev:/dev
+      # DDS profile (bind-mount so edits don't require rebuild)
+      - ./dds_profiles:/dds_profiles:ro
+      # Bag output — persists outside container
+      - ./bags:/root/bags
+
+    # ── USB / video device access ─────────────────────────────────────── #
+    # Major 81  = video4linux (/dev/video*)      — depth, colour, infra streams
+    # Major 189 = USB serial (/dev/bus/usb/*)    — libusb control plane
+    device_cgroup_rules:
+      - 'c 81:* rmw'
+      - 'c 189:* rmw'
+
+    # ── NVIDIA GPU ────────────────────────────────────────────────────── #
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    network_mode: host
+    privileged: false      # device_cgroup_rules + /dev mount is sufficient
+    stdin_open: true
+    tty: true
+    restart: unless-stopped

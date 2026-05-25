@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!-- Restrict CycloneDDS to loopback only — same pattern as docker-stonefish.
+     Prevents DDS discovery from flooding the lab network. -->
+<CycloneDDS>
+  <Domain id="any">
+    <General>
+      <Interfaces>
+        <NetworkInterface name="lo" multicast="true" />
+      </Interfaces>
+    </General>
+    <Internal>
+      <!-- Keep min at 2MB — must not exceed net.core.rmem_max on the host.
+           Raise permanently: echo net.core.rmem_max=26214400 | sudo tee /etc/sysctl.d/99-ros2-dds.conf -->
+      <SocketReceiveBufferSize min="2MB"/>
+    </Internal>
+  </Domain>
+</CycloneDDS>
