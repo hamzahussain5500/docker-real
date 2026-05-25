@@ -75,10 +75,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # ── 5. Shell environment ─────────────────────────────────────────────────── #
-RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash"          >> /root/.bashrc \
- && echo "export ROS_DOMAIN_ID=0"                            >> /root/.bashrc \
- && echo "export ROS_AUTOMATIC_DISCOVERY_RANGE=localhost"    >> /root/.bashrc \
- && echo "export RCUTILS_COLORIZED_OUTPUT=1"                 >> /root/.bashrc
+# ROS_DOMAIN_ID and ROS_AUTOMATIC_DISCOVERY_RANGE come from the container ENV
+# (set by docker-compose / .env) so they can be overridden without rebuilding.
+RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash"  >> /root/.bashrc \
+ && echo "export RCUTILS_COLORIZED_OUTPUT=1"         >> /root/.bashrc \
+ && echo "# Auto-refresh the ROS 2 graph daemon on every new shell so" >> /root/.bashrc \
+ && echo "# ros2 topic list is always current and never shows a stale cache." >> /root/.bashrc \
+ && echo "ros2 daemon stop &>/dev/null; ros2 daemon start &>/dev/null" >> /root/.bashrc
 
 # ── 6. Entrypoint — checks USB memory and camera visibility at startup ────── #
 COPY entrypoint.sh /entrypoint.sh

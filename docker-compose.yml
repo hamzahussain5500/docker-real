@@ -4,40 +4,69 @@ services:
       context: .
       dockerfile: Dockerfile
     image: realsense-ros2-jazzy:latest
-    container_name: realsense
+    container_name: ${container_name}
+    hostname: ${hostname}
+    # Make the container's hostname resolve locally so DDS doesn't advertise
+    # an unroutable address to peers on the LAN.
+    extra_hosts:
+      - "${hostname}:127.0.0.1"
+
+    stdin_open: true
+    tty: true
+    # Host networking so RealSense topics are visible to all other containers
+    # (docker-stereo, docker-ohm, etc.) and to the host via DDS.
+    network_mode: host
+    ipc: host        # shared-memory DDS transport for high-bandwidth image topics
+    pid: host        # ros2 node list / topic list sees nodes across containers
+    # privileged is required for IMU (IIO/HID) access.
+    # The gyro/accel streams go through the Linux IIO subsystem and librealsense
+    # must write to /sys/devices/.../iio:device*/scan_elements/ to enable them.
+    # device_cgroup_rules covers /dev/video* and /dev/bus/usb for depth+colour,
+    # but sysfs writes are only possible with privileged: true.
+    privileged: true
+    restart: unless-stopped
 
     environment:
-      # X11 GUI (RViz2, rqt)
-      DISPLAY: ${DISPLAY:-:0}
-      QT_X11_NO_MITSHM: 1
-      XDG_RUNTIME_DIR: /tmp/runtime-root
-      # NVIDIA — runtime injects libGL, libcuda etc at container start
-      NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DRIVER_CAPABILITIES: graphics,compute,utility,video
-      # ROS 2
-      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
-      ROS_AUTOMATIC_DISCOVERY_RANGE: localhost
-      RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
-      CYCLONEDDS_URI: "file:///dds_profiles/cyclonedds_profile.xml"
+      # ── Display ─────────────────────────────────────────────────────────── #
+      - DISPLAY=${DISPLAY:-:0}
+      - QT_X11_NO_MITSHM=1
+      - XDG_RUNTIME_DIR=/tmp/runtime-root
+      # ── ROS 2 graph ─────────────────────────────────────────────────────── #
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - ROS_LOCALHOST_ONLY=${ROS_LOCALHOST_ONLY:-0}
+      # LOCALHOST: only discover nodes on this machine (Jazzy+ feature).
+      # Combined with the lo-only CycloneDDS profile this is belt-and-suspenders.
+      - ROS_AUTOMATIC_DISCOVERY_RANGE=${ROS_AUTOMATIC_DISCOVERY_RANGE:-LOCALHOST}
+      - RMW_IMPLEMENTATION=${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}
+      # Hardcoded to the container-internal mount path so host env vars
+      # (e.g. CYCLONEDDS_URI exported in a dev shell) can never override them.
+      - FASTDDS_DEFAULT_PROFILES_FILE=/dds_profiles/fastdds_profile.xml
+      - CYCLONEDDS_URI=file:///dds_profiles/cyclonedds_profile.xml
+      - RMW_ZENOH_CONFIG_FILE=/dds_profiles/zenoh_config.json5
+      # ── NVIDIA ──────────────────────────────────────────────────────────── #
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=graphics,compute,utility,video
 
     volumes:
-      # X11 socket for GUI
+      # X11 socket for GUI (RViz2, rqt)
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      # Full /dev so all video + USB devices are visible (same approach as 2b-t repo)
+      # Full /dev so all video + USB devices are visible
       - /dev:/dev
-      # DDS profile (bind-mount so edits don't require rebuild)
+      # DDS profiles — bind-mounted so edits take effect without a rebuild.
+      # All three profiles ship here so the user can switch RMW via .env
+      # without any other change.
       - ./dds_profiles:/dds_profiles:ro
-      # Bag output — persists outside container
+      # Bag output — persists on the host outside the container
       - ./bags:/root/bags
 
-    # ── USB / video device access ─────────────────────────────────────── #
-    # Major 81  = video4linux (/dev/video*)      — depth, colour, infra streams
-    # Major 189 = USB serial (/dev/bus/usb/*)    — libusb control plane
+    # ── USB / video device access ──────────────────────────────────────────── #
+    # Major 81  = video4linux (/dev/video*)   — depth, colour, infra streams
+    # Major 189 = USB serial (/dev/bus/usb/*) — libusb control plane
     device_cgroup_rules:
       - 'c 81:* rmw'
       - 'c 189:* rmw'
 
-    # ── NVIDIA GPU ────────────────────────────────────────────────────── #
+    # ── NVIDIA GPU ─────────────────────────────────────────────────────────── #
     deploy:
       resources:
         reservations:
@@ -45,9 +74,3 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-
-    network_mode: host
-    privileged: false      # device_cgroup_rules + /dev mount is sufficient
-    stdin_open: true
-    tty: true
-    restart: unless-stopped
